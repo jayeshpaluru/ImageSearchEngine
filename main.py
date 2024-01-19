@@ -7,6 +7,7 @@ import torchvision.transforms as transforms
 from torchvision.models import resnet50
 from PIL import Image
 from io import BytesIO
+import pickle
 
 # Function to load images from a folder
 def load_images_from_folder(folder):
@@ -20,7 +21,7 @@ def load_images_from_folder(folder):
     return images, filenames
 
 # Function to generate embeddings
-def generate_embeddings(model, images):
+def generate_embeddings(model, images, batch_size=32):
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -28,10 +29,11 @@ def generate_embeddings(model, images):
     ])
 
     embeddings = []
-    for img in images:
-        img_t = transform(img).unsqueeze(0)
+    for i in range(0, len(images), batch_size):
+        batch = images[i:i+batch_size]
+        batch_t = torch.stack([transform(img) for img in batch])
         with torch.no_grad():
-            emb = model(img_t).numpy()
+            emb = model(batch_t).numpy()
         embeddings.append(emb)
 
     return np.vstack(embeddings)
@@ -49,15 +51,26 @@ def main():
     model.eval()
 
     # Load images from dataset
-    folder = "path/to/your/image/dataset"
+    folder = "/Users/jayeshpaluru/Downloads/Boredom/ImagesForEngine"
     images, filenames = load_images_from_folder(folder)
 
-    # Generate embeddings
-    embeddings = generate_embeddings(model, images)
+    # Check if embeddings and index are cached
+    if os.path.exists("embeddings.pkl") and os.path.exists("index.faiss"):
+        with open("embeddings.pkl", "rb") as f:
+            embeddings = pickle.load(f)
+        index = faiss.read_index("index.faiss")
+    else:
+        # Generate embeddings
+        embeddings = generate_embeddings(model, images)
 
-    # Build the Faiss index
-    index = faiss.IndexFlatL2(embeddings.shape[1])
-    index.add(embeddings)
+        # Build the Faiss index
+        index = faiss.IndexFlatL2(embeddings.shape[1])
+        index.add(embeddings)
+
+        # Cache embeddings and index
+        with open("embeddings.pkl", "wb") as f:
+            pickle.dump(embeddings, f)
+        faiss.write_index(index, "index.faiss")
 
     # Search for similar images
     base64_string = input("Enter base64 string of query image: ")
